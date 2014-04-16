@@ -30,10 +30,6 @@
  */
 class VizualizerContent_Batch_CheckUpdate extends Vizualizer_Plugin_Batch
 {
-    private $url;
-
-    private $content;
-
     public function getName(){
         return "Check Page Update";
     }
@@ -51,10 +47,13 @@ class VizualizerContent_Batch_CheckUpdate extends Vizualizer_Plugin_Batch
     protected function checkPage($params, $data){
         // パラメータから日付を取得
         if(count($params) >= 4){
-            $this->url = $params[3];
-            $this->content = file_get_contents($this->url);
+            $url = $params[3];
+            $content = file_get_contents($url);
             // URLに該当するコンテンツがある場合には、URL情報を登録
             if(!empty($this->content)){
+                // コンテンツをphpQueryに読み込み
+                $html = phpQuery::newDocument($content);
+
                 // トランザクションの開始
                 $connection = Vizualizer_Database_Factory::begin("content");
 
@@ -64,10 +63,10 @@ class VizualizerContent_Batch_CheckUpdate extends Vizualizer_Plugin_Batch
                     $model->findByUrl($this->url);
 
                     $model->url = $this->url;
-                    if(preg_match("/<title>(.+)</title>/i", $this->content, $params) > 0){
-                        $model->title = trim($params[1]);
-                    }
+                    $model->title = trim($html['title']->text());
                     $model->save();
+                    $data["page"] = $model;
+                    $data["content"] = $html;
 
                     // エラーが無かった場合、処理をコミットする。
                     Vizualizer_Database_Factory::commit($connection);
@@ -90,30 +89,47 @@ class VizualizerContent_Batch_CheckUpdate extends Vizualizer_Plugin_Batch
         // パラメータから日付を取得
         if(count($params) > 4){
             for($i = 4; $i < count($params); $i ++){
-                $path = $params[$i];
+                $selector = $params[$i];
+                // ページが作成されている場合にはページ内の項目を登録
+                $page = $data["page"];
+                if($page->page_id > 0){
+                    // トランザクションの開始
+                    $connection = Vizualizer_Database_Factory::begin("content");
 
-            }
-            // URLに該当するコンテンツがある場合には、URL情報を登録
-            if(!empty($this->content)){
-                // トランザクションの開始
-                $connection = Vizualizer_Database_Factory::begin("content");
-
-                try {
+                    // ページ項目モデルを生成
                     $loader = new Vizualizer_Plugin("Content");
-                    $model = $loader->loadModel("Page");
-                    $model->findByUrl($this->url);
+                    $model = $loader->loadModel("PageItem");
 
-                    $model->url = $this->url;
-                    if(preg_match("/<title>(.+)</title>/i", $this->content, $params) > 0){
-                        $model->title = trim($params[1]);
+                    // ページ内の項目全体に削除フラグを立てる
+                    $items = $model->findAllByPageId($page->page_id);
+                    foreach($items as $item){
+                        $item->deleted = 1;
+                        $item->save();
                     }
-                    $model->save();
 
-                    // エラーが無かった場合、処理をコミットする。
-                    Vizualizer_Database_Factory::commit($connection);
-                } catch (Exception $e) {
-                    Vizualizer_Database_Factory::rollback($connection);
-                    throw new Vizualizer_Exception_Database($e);
+                    try {
+                        $html = $data["content"];
+                        $items = $html[$selector];
+
+                        foreach($items as $item){
+                            $model = $loader->loadModel("PageItem");
+                            $model->findByPageItem($page->page_id, $selector, pq($item)->text());
+                            if(!($model->page_item_id > 0)){
+                                $model->page_id = $page->page_id;
+                                $model->item_selector = $selector;
+                                $model->item_value = pq($item)->text();
+                                $model->created = 1;
+                            }
+                            $model->deleted = 0;
+                            $model->save();
+                        }
+
+                        // エラーが無かった場合、処理をコミットする。
+                        Vizualizer_Database_Factory::commit($connection);
+                    } catch (Exception $e) {
+                        Vizualizer_Database_Factory::rollback($connection);
+                        throw new Vizualizer_Exception_Database($e);
+                    }
                 }
             }
         }
