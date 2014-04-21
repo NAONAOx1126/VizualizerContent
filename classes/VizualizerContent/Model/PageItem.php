@@ -53,11 +53,11 @@ class VizualizerContent_Model_PageItem extends Vizualizer_Plugin_Model
     }
 
     /**
-     * ページID、セレクタ、値でデータを取得する
+     * ページID、タイトル、項目名でデータを取得する
      */
-    public function findByPageItem($page_id, $item_selector, $item_value)
+    public function findByItemTitle($page_id, $item_title)
     {
-        $this->findBy(array("page_id" => $page_id, "item_selector" => $item_selector, "item_value" => $item_value));
+        $this->findBy(array("page_id" => $page_id, "item_title" => $item_title));
     }
 
     /**
