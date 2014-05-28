@@ -30,10 +30,6 @@
  */
 class VizualizerContent_Batch_CheckUpdate extends Vizualizer_Plugin_Batch
 {
-    private $url;
-
-    private $content;
-
     public function getName(){
         return "Check Page Update";
     }
@@ -49,25 +45,28 @@ class VizualizerContent_Batch_CheckUpdate extends Vizualizer_Plugin_Batch
      * @return バッチで引き回すデータ
      */
     protected function checkPage($params, $data){
-        // パラメータから日付を取得
+        // パラメータからURLを取得
         if(count($params) >= 4){
-            $this->url = $params[3];
-            $this->content = file_get_contents($this->url);
+            $url = $params[3];
+            $content = file_get_contents($url);
             // URLに該当するコンテンツがある場合には、URL情報を登録
-            if(!empty($this->content)){
+            if(!empty($content)){
+                // コンテンツをphpQueryに読み込み
+                $html = phpQuery::newDocument($content);
+
                 // トランザクションの開始
                 $connection = Vizualizer_Database_Factory::begin("content");
 
                 try {
                     $loader = new Vizualizer_Plugin("Content");
                     $model = $loader->loadModel("Page");
-                    $model->findByUrl($this->url);
+                    $model->findByPageUrl($url);
 
-                    $model->url = $this->url;
-                    if(preg_match("/<title>(.+)</title>/i", $this->content, $params) > 0){
-                        $model->title = trim($params[1]);
-                    }
+                    $model->page_url = $url;
+                    $model->page_title = trim($html['title']->text());
                     $model->save();
+                    $data["page"] = $model;
+                    $data["content"] = $html;
 
                     // エラーが無かった場合、処理をコミットする。
                     Vizualizer_Database_Factory::commit($connection);
@@ -87,27 +86,76 @@ class VizualizerContent_Batch_CheckUpdate extends Vizualizer_Plugin_Batch
      * @return バッチで引き回すデータ
      */
     protected function checkPageItems($params, $data){
-        // パラメータから日付を取得
-        if(count($params) > 4){
-            for($i = 4; $i < count($params); $i ++){
-                $path = $params[$i];
+        $page = $data["page"];
+        $selectors = Vizualizer_Configure::get("checkSelectors");
 
-            }
-            // URLに該当するコンテンツがある場合には、URL情報を登録
-            if(!empty($this->content)){
+        foreach($selectors as $selector => $configs){
+            if($page->page_id > 0){
                 // トランザクションの開始
                 $connection = Vizualizer_Database_Factory::begin("content");
 
-                try {
-                    $loader = new Vizualizer_Plugin("Content");
-                    $model = $loader->loadModel("Page");
-                    $model->findByUrl($this->url);
+                // ページ項目モデルを生成
+                $loader = new Vizualizer_Plugin("Content");
+                $model = $loader->loadModel("PageItem");
 
-                    $model->url = $this->url;
-                    if(preg_match("/<title>(.+)</title>/i", $this->content, $params) > 0){
-                        $model->title = trim($params[1]);
+                // ページ内の項目全体に削除フラグを立てる
+                $items = $model->findAllByPageId($page->page_id);
+                foreach($items as $item){
+                    $item->deleted ++;
+                    $item->save();
+                }
+
+                try {
+                    $html = $data["content"];
+                    $items = $html[$selector];
+                    foreach($items as $item){
+                        $values = array();
+                        foreach($configs as $key => $config){
+                            switch($config["type"]){
+                                case "html":
+                                    $values[$key] = pq($item)->find($config["selector"])->html();
+                                    break;
+                                case "attr":
+                                    $values[$key] = pq($item)->find($config["selector"])->attr($config["attr"]);
+                                    if($config["attr"] == "href" || $config["attr"] == "src"){
+                                        $info = parse_url($values[$key]);
+                                        if(!array_key_exists("scheme", $info)){
+                                            // URLで無い場合はURL化する。
+                                            $info2 = parse_url($page->page_url);
+                                            $info2["path"] = pathinfo($info2["path"]);
+                                            if(substr($values[$key], 0, 1) == "/"){
+                                                $values[$key] = $info2["scheme"]."://".$info2["host"].$values[$key];
+                                            }elseif(array_key_exists("extension", $info2["path"])){
+                                                $values[$key] = $info2["scheme"]."://".$info2["host"].(!empty($info2["path"]["dirname"])?$info2["path"]["dirname"]:"")."/".$values[$key];
+                                            }else{
+                                                $values[$key] = $info2["scheme"]."://".$info2["host"].(!empty($info2["path"]["dirname"])?$info2["path"]["dirname"]:"").(!empty($info2["path"]["basename"])?"/".$info2["path"]["basename"]:"")."/".$values[$key];
+                                            }
+                                        }
+                                    }
+                                    break;
+                                default:
+                                    $values[$key] = pq($item)->find($config["selector"])->text();
+                                    break;
+                            }
+                        }
+                        if (!empty($values["title"]) && !empty($values["name"])) {
+                            $model = $loader->loadModel("PageItem");
+                            $model->findByItemTitle($page->page_id, $values["title"]);
+                            if (!($model->page_item_id > 0)) {
+                                $model->page_id = $page->page_id;
+                                $model->item_selector = $selector;
+                                $model->item_title = $values["title"];
+                                $model->item_name = $values["name"];
+                                $model->created = 1;
+                            }
+                            if ($model->item_value != $values["value"]) {
+                                $model->item_value = $values["value"];
+                                $model->updated = 1;
+                            }
+                            $model->deleted = 0;
+                            $model->save();
+                        }
                     }
-                    $model->save();
 
                     // エラーが無かった場合、処理をコミットする。
                     Vizualizer_Database_Factory::commit($connection);

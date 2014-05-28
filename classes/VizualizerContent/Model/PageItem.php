@@ -53,13 +53,21 @@ class VizualizerContent_Model_PageItem extends Vizualizer_Plugin_Model
     }
 
     /**
+     * ページID、タイトル、項目名でデータを取得する
+     */
+    public function findByItemTitle($page_id, $item_title)
+    {
+        $this->findBy(array("page_id" => $page_id, "item_title" => $item_title));
+    }
+
+    /**
      * ページIDでデータを取得する。
      *
      * @param $page_id ページID
      */
-    public function findByPageId($page_id)
+    public function findAllByPageId($page_id)
     {
-        $this->findBy(array("page_id" => $page_id));
+        return $this->findAllBy(array("page_id" => $page_id));
     }
 
     /**
@@ -71,7 +79,7 @@ class VizualizerContent_Model_PageItem extends Vizualizer_Plugin_Model
     {
         $loader = new Vizualizer_Plugin("content");
         $pageItem = $loader->loadModel("Page");
-        $pageItems = $pageItem->findAllByPrimaryKey($this->page_id);
-        return $pageItems;
+        $pageItem->findByPrimaryKey($this->page_id);
+        return $pageItem;
     }
 }
