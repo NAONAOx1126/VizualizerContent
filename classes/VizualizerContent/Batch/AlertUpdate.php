@@ -73,7 +73,7 @@ class VizualizerContent_Batch_AlertUpdate extends Vizualizer_Plugin_Batch
                 foreach($data[$target] as $item){
                     $count ++;
                     $body .= "\t".$item->item_name."（".$item->item_title."）\r\n";
-                    if($item->deleted == "1"){
+                    if($item->deleted > 5){
                         $item->delete();
                     }else{
                         $item->created = 0;
